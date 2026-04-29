@@ -1,0 +1,10 @@
+{
+  "name": "timbre",
+  "description": "Subagent persona collection — curated virtual worker personalities for specialized tasks",
+  "version": "0.1.0",
+  "author": {
+    "name": "NingyanZhu",
+    "email": "nzhu9313@gmail.com"
+  },
+  "keywords": ["subagents", "personas", "virtual-workers"]
+}

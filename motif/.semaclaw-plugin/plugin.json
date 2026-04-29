@@ -1,0 +1,10 @@
+{
+  "name": "motif",
+  "description": "Personal skill toolkit — frequently used agent skills",
+  "version": "0.1.0",
+  "author": {
+    "name": "NingyanZhu",
+    "email": "nzhu9313@gmail.com"
+  },
+  "keywords": ["skills", "tools", "workflow"]
+}
