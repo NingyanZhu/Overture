@@ -1,0 +1,30 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${SEMACLAW_PLUGIN_ROOT}/hooks/save-history.js",
+            "timeout": 10,
+            "async": true,
+            "include_history": true
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${SEMACLAW_PLUGIN_ROOT}/hooks/save-history.js",
+            "timeout": 10,
+            "async": true,
+            "include_history": true
+          }
+        ]
+      }
+    ]
+  }
+}
