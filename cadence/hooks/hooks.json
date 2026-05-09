@@ -1,0 +1,29 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${SEMACLAW_PLUGIN_ROOT}/hooks/gene-inject.js",
+            "blocking": true,
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${SEMACLAW_PLUGIN_ROOT}/hooks/gene-evolve.js",
+            "async": true,
+            "include_history": true,
+            "timeout": 240
+          }
+        ]
+      }
+    ]
+  }
+}

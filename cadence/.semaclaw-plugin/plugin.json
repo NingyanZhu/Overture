@@ -1,0 +1,10 @@
+{
+  "name": "cadence",
+  "description": "Self-evolving gene layer — distil atomic constraints from past conversations and inject the most relevant ones into each new prompt",
+  "version": "0.1.0",
+  "author": {
+    "name": "NingyanZhu",
+    "email": "nzhu9313@gmail.com"
+  },
+  "keywords": ["self-evolve", "gene", "wiki", "hooks", "reflection", "agent-task"]
+}

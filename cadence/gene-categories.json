@@ -1,0 +1,36 @@
+{
+  "trigger": {
+    "min_turns": 15,
+    "min_assistant_duration_ms": 180000,
+    "c2_distinct_keywords": 3,
+    "_comment": "2-of-3 must hit (turns / duration / keywords) for gene-evolve to invoke the CLI"
+  },
+  "inject": {
+    "max_genes": 8,
+    "min_score": 0.05,
+    "skip_if_prompt_words_lt": 10,
+    "_comment": "<agent-genes> block budget — top-N by intent intersection score, prompts shorter than threshold are skipped"
+  },
+  "evolve": {
+    "max_genes_per_call": 3,
+    "min_confidence": 0.6,
+    "jaccard_dedup_threshold": 0.7,
+    "history_fold_max_chars": 4000,
+    "cli_timeout_ms": 180000,
+    "tools_whitelist": "Read,Glob,Grep,Skill"
+  },
+  "categories": {
+    "_comment": "Allowed top-level domains. CLI prompt feeds existing wiki dirs to LLM; this list is documentation only and not enforced.",
+    "known": [
+      "Research/Search",
+      "Research/Analysis",
+      "Coding/Debugging",
+      "Coding/Implementation",
+      "Design/UI",
+      "Design/Architecture",
+      "General/TaskBreakdown",
+      "General/ResourceUse",
+      "General/Communication"
+    ]
+  }
+}

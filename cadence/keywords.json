@@ -1,0 +1,47 @@
+{
+  "user_dissatisfaction": {
+    "en": [
+      "stupid", "dumb", "silly", "nonsense", "waste of time"
+    ],
+    "zh": [
+      "笨", "蠢", "不对", "不行", "没用", "别这样", "不要", "停",
+      "绕圈", "兜圈", "又来", "怎么又", "怎么还", "你在干嘛", "浪费时间"
+    ]
+  },
+  "external_failure": {
+    "en": [
+      "error", "errors", "errored", "exception", "traceback", "panic", "stack trace",
+      "failed", "failure", "fail",
+      "timeout", "timed out", "deadline exceeded",
+      "rate limit", "rate-limited", "rate_limited", "throttled", "429", "503", "502",
+      "quota", "exceeded", "limit exceeded", "token limit", "context limit",
+      "abort", "aborted", "cancelled", "killed", "interrupted",
+      "denied", "forbidden", "unauthorized", "401", "403",
+      "unable to", "can't", "cannot", "could not",
+      "malformed", "invalid", "parse error"
+    ],
+    "zh": [
+      "失败", "出错", "错误", "异常", "报错", "崩", "挂了", "超时", "超限", "限流",
+      "没找到", "找不到", "拿不到", "取不到", "不可用"
+    ]
+  },
+  "self_correction": {
+    "en": [
+      "sorry", "apologies", "my apologies", "my mistake", "i was wrong",
+      "let me try again", "let me retry", "let me redo",
+      "i should have", "i shouldn't have", "instead of"
+    ],
+    "zh": [
+      "抱歉", "不好意思", "我搞错了", "我弄错了", "重新", "重试", "再试", "应该"
+    ]
+  },
+  "inefficient_pattern": {
+    "en": [
+      "loop", "looping", "stuck", "circular", "going in circles",
+      "redundant", "repeatedly", "again and again"
+    ],
+    "zh": [
+      "死循环", "循环", "卡住", "反复", "来回", "兜兜转转", "走弯路", "重复"
+    ]
+  }
+}
