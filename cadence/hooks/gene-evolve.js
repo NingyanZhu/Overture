@@ -423,7 +423,10 @@ function buildTaskPrompt({ folded, domains, topGenes, triggerSummary }) {
     '- Schema: { "genes": [ { "task_domain": "<Cat>/<Sub>", "is_new_domain": false, "keywords": ["...", ...], "gene_body": "AVOID: ..." | "DO: ...", "confidence": 0.0, "reasoning_brief": "<=50 words" } ] }',
     '- "genes" array length MUST be ≤ ' + MAX_GENES_PER_CALL + '. Empty array allowed if nothing useful to extract.',
     '- "gene_body" MUST be ONE LINE, ≤ 75 words, starting with "AVOID:" or "DO:". No examples, no story, no source. Pure constraint.',
-    '- "keywords" MUST be 3–6 short tokens, lowercase, that capture the *intent* of the gene (used for future matching).',
+    '- "keywords" MUST be lowercase short tokens capturing the *intent* of the gene (used for purely string-level retrieval at inject time — no embeddings, no translation).',
+    '  · ALWAYS include 3–6 English keywords (lingua franca for cross-language retrieval and tooling/code terms).',
+    '  · IF the conversation primarily uses another language (Chinese / Japanese / Korean / etc.), ALSO include 3–6 keywords in that language alongside the English ones, so users prompting in their own language still match this gene.',
+    '  · Total length: 3–12. Examples: ["auth", "token", "debug"] for English-only conversations; ["auth", "token", "debug", "鉴权", "令牌", "调试"] for an EN/ZH conversation.',
     '- "task_domain" MUST be of the form "<Category>/<Subcategory>", depth=2. Use an existing domain when it fits; only set is_new_domain=true if you genuinely need a new one.',
     '- "confidence" ∈ [0, 1]; we only persist genes with confidence ≥ ' + MIN_CONFIDENCE + '.',
     '- Prefer AVOID over DO. Failures distil more cleanly than successes.',
@@ -521,6 +524,12 @@ function writeEvolveLog(record) {
 // ───────── main ─────────
 
 function main() {
+  // 必须先把 stdin 读完再做任何 process.exit。否则父进程（sema-core CommandExecutor）
+  // 还在向我们 stdin 里写大 payload 时，我们已退出，父进程 write 触发 EPIPE 未捕获
+  // 直接崩掉 daemon。sema-core 侧根本修复要在 CommandExecutor.spawn 之后挂
+  // proc.stdin.on('error', () => {})，但这条流水线先在 hook 内消除触发条件。
+  const stdin = readStdinSync();
+
   if (process.env.SEMACLAW_INTERNAL_AGENT === '1') {
     process.exit(0);
   }
@@ -533,7 +542,6 @@ function main() {
   let record = { ts: new Date().toISOString(), stage: 'start' };
   try {
     const t0 = Date.now();
-    const stdin = readStdinSync();
     const payload = stdin ? JSON.parse(stdin) : {};
     const history = Array.isArray(payload.conversation_history) ? payload.conversation_history
       : Array.isArray(payload.context_history) ? payload.context_history : [];
@@ -669,7 +677,7 @@ function main() {
       if (!body) { reason('bad-body'); continue; }
 
       const kwArr = Array.isArray(raw.keywords) ? raw.keywords.map(k => String(k).toLowerCase()).filter(Boolean) : [];
-      if (kwArr.length < 3 || kwArr.length > 6) { reason(`bad-keywords:${kwArr.length}`); continue; }
+      if (kwArr.length < 3 || kwArr.length > 12) { reason(`bad-keywords:${kwArr.length}`); continue; }
 
       const sameDomain = allExisting.filter(g => g.task_domain === domain);
       let dup = false;

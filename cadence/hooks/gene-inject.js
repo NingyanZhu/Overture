@@ -172,11 +172,15 @@ function rankGenes(promptKw, allGenes, weightMap, now) {
 }
 
 async function main() {
+  // 先把 stdin 读完再做任何早退判断，避免父进程（sema-core CommandExecutor）
+  // 仍在 write payload 时我们已退出，触发未捕获的 EPIPE 把 daemon 干掉。
+  let stdin = '';
+  try { stdin = await readStdin(); } catch {}
+
   if (process.env.SEMACLAW_INTERNAL_AGENT === '1') return 0;
 
   let payload;
   try {
-    const stdin = await readStdin();
     payload = stdin ? JSON.parse(stdin) : {};
   } catch { return 0; }
 
@@ -210,12 +214,23 @@ async function main() {
   if (ranked.length === 0) return 0;
 
   const picked = ranked.map(x => x.g);
-  const catAttr = deriveCategoryAttr(picked);
-  const lines = [`<agent-genes category="${catAttr}">`];
+  // Group genes by category and render as a single <system-reminder> with
+  // `##Cat/Sub` sections. The LLM consumes this as a normal system reminder —
+  // no plugin-internal terminology ("agent-genes" etc.) leaks through.
+  const byCat = new Map();
   for (const g of picked) {
-    lines.push(g.text.replace(/\s+/g, ' ').trim());
+    const cat = g.file.replace(/^Agent Genes[\\/]/, '').replace(/\.md$/, '');
+    if (!byCat.has(cat)) byCat.set(cat, []);
+    byCat.get(cat).push(g);
   }
-  lines.push('</agent-genes>');
+  const lines = ['<system-reminder>'];
+  for (const [cat, genes] of byCat) {
+    lines.push(`##${cat}`);
+    for (const g of genes) {
+      lines.push(g.text.replace(/\s+/g, ' ').trim());
+    }
+  }
+  lines.push('</system-reminder>');
   emit(lines.join('\n'));
 
   // Bump hits on all picked genes; persist sidecar.
