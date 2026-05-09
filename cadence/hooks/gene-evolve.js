@@ -172,9 +172,17 @@ function matchCategory(text, vocab) {
   return new Set([...en, ...zh]);
 }
 
-function judgeTrigger(slice) {
+function judgeTrigger(slice, turnDurationMs) {
   const turns = countTurns(slice);
-  const durationMs = sumAssistantDurationMs(slice);
+  // 优先使用 sema-core 通过 StopHookInput.turn_duration_ms 注入的 wall-clock，
+  // 它包含工具执行 + 等待时间，是"用户在这轮折腾了多久"的真实度量。
+  // 老版本 sema-core 不带此字段时退回累加 message.durationMs（仅 API 时间和，会偏低）。
+  const durationMs = (typeof turnDurationMs === 'number' && turnDurationMs > 0)
+    ? turnDurationMs
+    : sumAssistantDurationMs(slice);
+  const durationSource = (typeof turnDurationMs === 'number' && turnDurationMs > 0)
+    ? 'turn_duration_ms'
+    : 'sum_message_durationMs';
 
   const aHit = turns >= MIN_TURNS;
   const bHit = durationMs >= MIN_DURATION_MS;
@@ -204,7 +212,7 @@ function judgeTrigger(slice) {
   const score = (aHit ? 1 : 0) + (bHit ? 1 : 0) + (cHit ? 1 : 0);
   return {
     fire: score >= 2,
-    turns, durationMs,
+    turns, durationMs, durationSource,
     aHit, bHit, cHit, c1, c2,
     keywordHits: Array.from(all),
     realUserText: realUserText.trim().slice(0, 500),
@@ -557,9 +565,12 @@ function main() {
       process.exit(0);
     }
 
-    const trig = judgeTrigger(slice);
+    // turn_duration_ms 由 sema-core StopHookInput 注入；旧版本 sema-core 没此字段，
+    // judgeTrigger 内部会自动 fallback 到累加 message.durationMs。
+    const trig = judgeTrigger(slice, payload.turn_duration_ms);
     record.trigger = {
-      fire: trig.fire, turns: trig.turns, durationMs: trig.durationMs,
+      fire: trig.fire, turns: trig.turns,
+      durationMs: trig.durationMs, durationSource: trig.durationSource,
       aHit: trig.aHit, bHit: trig.bHit, cHit: trig.cHit,
       keywordHits: trig.keywordHits,
     };
