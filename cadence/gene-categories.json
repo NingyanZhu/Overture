@@ -8,7 +8,7 @@
   "inject": {
     "max_genes": 8,
     "min_score": 0.05,
-    "skip_if_prompt_words_lt": 10,
+    "skip_if_prompt_words_lt": 8,
     "_comment": "<agent-genes> block budget — top-N by intent intersection score, prompts shorter than threshold are skipped"
   },
   "evolve": {
