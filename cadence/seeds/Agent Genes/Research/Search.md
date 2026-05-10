@@ -12,10 +12,6 @@ AVOID: retry the same search API >3x when rate-limited; summarize from existing 
 intent: [research, todolist, subtask, parallel, decompose, fanout, 调研, 拆分, 并行, 子任务]
 AVOID: splitting a single research query into >5 parallel subtasks; group related searches into one call
 
-## search-confirm-breadth
-intent: [search, scope, breadth, queries, confirm, 搜索, 范围, 确认, 查询]
-DO: confirm search scope with user before issuing >3 distinct queries in sequence
-
 ## search-source-dedup
 intent: [search, results, sources, dedup, duplicate, 搜索, 去重, 来源, 重复]
 DO: dedup results by canonical URL or title before summarizing to keep signal density high
