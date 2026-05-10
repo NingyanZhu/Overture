@@ -9,7 +9,8 @@
     "max_genes": 8,
     "min_score": 0.05,
     "skip_if_prompt_words_lt": 8,
-    "_comment": "<agent-genes> block budget — top-N by intent intersection score, prompts shorter than threshold are skipped"
+    "category_boost_alpha": 0.4,
+    "_comment": "Top-N by score = intent_score + α × category_score, where α = category_boost_alpha. Category match draws on the file's path tokens + frontmatter tags. Prompts shorter than skip_if_prompt_words_lt are bypassed."
   },
   "evolve": {
     "max_genes_per_call": 3,

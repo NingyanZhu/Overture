@@ -29,6 +29,11 @@ const INJECT = (CONFIG && CONFIG.inject) || {};
 const MAX_GENES = INJECT.max_genes ?? 8;
 const MIN_SCORE = INJECT.min_score ?? 0.05;
 const SKIP_IF_WORDS_LT = INJECT.skip_if_prompt_words_lt ?? 10;
+// Category-tag boost: final_score = intent_score + α × category_score.
+// α=0 falls back to intent-only matching; 0.4 is the empirical starting value
+// (intent contributes [0,1], category contributes [0,0.4]). Adjust via
+// gene-categories.json:inject.category_boost_alpha after observing real hits.
+const CATEGORY_BOOST_ALPHA = INJECT.category_boost_alpha ?? 0.4;
 
 const STOPWORDS = new Set([
   'the', 'a', 'an', 'and', 'or', 'but', 'if', 'then', 'so', 'because',
@@ -99,14 +104,33 @@ function parseGenes(filePath, wikiRoot) {
   try { content = fs.readFileSync(filePath, 'utf8'); }
   catch { return []; }
 
-  // Strip frontmatter
+  // Parse frontmatter `tags: [...]` (file-level domain hints), then strip frontmatter from body
   let body = content;
+  let fileTags = [];
   if (body.startsWith('---')) {
     const end = body.indexOf('\n---', 3);
-    if (end >= 0) body = body.slice(end + 4);
+    if (end >= 0) {
+      const fm = body.slice(3, end);
+      const tagsMatch = fm.match(/^tags:\s*\[(.*?)\]\s*$/m);
+      if (tagsMatch) {
+        fileTags = tagsMatch[1].split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+      }
+      body = body.slice(end + 4);
+    }
   }
 
   const rel = path.relative(wikiRoot, filePath); // e.g. "Agent Genes/Research/Search.md"
+  // Path tokens: strip "Agent Genes/" prefix and ".md" suffix, split by /. These act as
+  // implicit, always-present category labels alongside frontmatter tags.
+  const pathTokens = rel
+    .replace(/^Agent Genes[\\/]/, '')
+    .replace(/\.md$/, '')
+    .split(/[\\/]/)
+    .map(s => s.trim().toLowerCase())
+    .filter(Boolean);
+  // Combined category signal — used by scoreGene as a boost on top of per-gene intent.
+  const categoryTokens = Array.from(new Set([...pathTokens, ...fileTags]));
+
   const blocks = body.split(/^## /m).slice(1); // first chunk before first ## is preamble
   const genes = [];
   for (const blk of blocks) {
@@ -126,22 +150,32 @@ function parseGenes(filePath, wikiRoot) {
     const text = bodyLines.join('\n').trim();
     if (!text) continue;
     if (intent.length === 0) continue;
-    genes.push({ file: rel, name, intent, text });
+    genes.push({ file: rel, name, intent, text, categoryTokens });
   }
   return genes;
 }
 
-function scoreGene(promptKeywords, gene) {
-  if (gene.intent.length === 0) return 0;
+// Count fuzzy hits of `tokens` against `promptKw`: exact membership first, then
+// 2+ char substring containment in either direction. Same algorithm is used for
+// per-gene intent and for file-level category tokens.
+function countHits(promptKw, tokens) {
+  if (!tokens || tokens.length === 0) return 0;
   let hits = 0;
-  for (const k of gene.intent) {
-    if (promptKeywords.has(k)) { hits++; continue; }
-    // also allow substring match on multi-word/Chinese keywords
-    for (const p of promptKeywords) {
+  for (const k of tokens) {
+    if (promptKw.has(k)) { hits++; continue; }
+    for (const p of promptKw) {
       if (p.length >= 2 && (k.includes(p) || p.includes(k))) { hits++; break; }
     }
   }
-  return hits / gene.intent.length;
+  return hits;
+}
+
+function scoreGene(promptKeywords, gene) {
+  if (!gene.intent || gene.intent.length === 0) return 0;
+  const intentScore = countHits(promptKeywords, gene.intent) / gene.intent.length;
+  const cat = gene.categoryTokens || [];
+  const catScore = cat.length > 0 ? countHits(promptKeywords, cat) / cat.length : 0;
+  return intentScore + CATEGORY_BOOST_ALPHA * catScore;
 }
 
 function deriveCategoryAttr(genes) {
