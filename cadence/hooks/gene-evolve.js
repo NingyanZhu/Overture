@@ -488,6 +488,58 @@ function buildTaskPrompt({ folded, domains, topGenes, triggerSummary }) {
   ].join('\n');
 }
 
+// ───────── stdout JSON salvage ─────────
+
+// `semaclaw agent-task --output json` is supposed to keep stdout pure, but it
+// occasionally leaks log lines (skill loader warnings, "session done in 50ms",
+// etc.) before the JSON payload. Strict JSON.parse then drops a perfectly good
+// gene. This salvages the trailing JSON object from any prefix noise.
+//
+// Approach: walk forward, collect every top-level balanced `{...}` substring
+// (string-aware so braces inside JSON strings don't count), then try them
+// last-first, accepting the first one whose shape matches { genes: [...] }.
+// Regex won't work because gene_body strings can legitimately contain `{`/`}`.
+function extractTrailingJsonObject(stdout) {
+  if (typeof stdout !== 'string' || !stdout.includes('{')) return null;
+  const candidates = [];
+  let i = 0;
+  while (i < stdout.length) {
+    const start = stdout.indexOf('{', i);
+    if (start < 0) break;
+    let depth = 0;
+    let inStr = false;
+    let esc = false;
+    let end = -1;
+    for (let j = start; j < stdout.length; j++) {
+      const c = stdout[j];
+      if (esc) { esc = false; continue; }
+      if (inStr) {
+        if (c === '\\') { esc = true; continue; }
+        if (c === '"') inStr = false;
+        continue;
+      }
+      if (c === '"') { inStr = true; continue; }
+      if (c === '{') depth++;
+      else if (c === '}') {
+        depth--;
+        if (depth === 0) { end = j; break; }
+      }
+    }
+    if (end < 0) break; // unbalanced from this `{` onward → give up
+    candidates.push({ s: stdout.slice(start, end + 1), at: start });
+    i = end + 1;
+  }
+  for (let k = candidates.length - 1; k >= 0; k--) {
+    try {
+      const p = JSON.parse(candidates[k].s);
+      if (p && typeof p === 'object' && Array.isArray(p.genes)) {
+        return { value: p, at: candidates[k].at };
+      }
+    } catch {}
+  }
+  return null;
+}
+
 // ───────── post-processing ─────────
 
 function jaccard(a, b) {
@@ -687,15 +739,25 @@ function main() {
     }
 
     let parsed;
-    try { parsed = JSON.parse(proc.stdout.toString()); }
+    const stdoutStr = (proc.stdout || '').toString();
+    try { parsed = JSON.parse(stdoutStr); }
     catch (e) {
-      // 理论上 CLI exit 0 还能让 stdout 不是 JSON 的情况只剩：模型在 `--output json`
-      // 路径下输出空、或某些极端 race。保留这个分支兜底。
-      record.stage = 'cli-bad-json';
-      record.stdout_tail = (proc.stdout || '').toString().slice(-500);
-      record.stderr_tail = (proc.stderr || '').toString().slice(-500);
-      writeEvolveLog(record);
-      process.exit(0);
+      // Fast-path JSON.parse failed. The usual culprit is `semaclaw agent-task`
+      // leaking log lines onto stdout in `--output json` mode (skill-loader
+      // warnings, "session done in 50ms", etc.). Try to salvage the trailing
+      // JSON object before declaring failure.
+      const rec = extractTrailingJsonObject(stdoutStr);
+      if (rec) {
+        parsed = rec.value;
+        record.cli_stdout_salvaged = true;
+        record.salvage_prefix_bytes = rec.at;
+      } else {
+        record.stage = 'cli-bad-json';
+        record.stdout_tail = stdoutStr.slice(-500);
+        record.stderr_tail = (proc.stderr || '').toString().slice(-500);
+        writeEvolveLog(record);
+        process.exit(0);
+      }
     }
 
     const proposedGenes = Array.isArray(parsed && parsed.genes) ? parsed.genes : [];
@@ -786,4 +848,5 @@ module.exports = {
   topRelevantGenes,
   buildTaskPrompt,
   acquireLock,
+  extractTrailingJsonObject,
 };
