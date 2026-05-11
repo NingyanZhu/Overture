@@ -1,9 +1,9 @@
 {
   "trigger": {
-    "min_turns": 15,
+    "message_length": 20,
     "min_assistant_duration_ms": 180000,
     "c2_distinct_keywords": 3,
-    "_comment": "2-of-3 must hit (turns / duration / keywords) for gene-evolve to invoke the CLI"
+    "_comment": "2-of-3 must hit (A: message_length ≥ this | B: wall-clock duration ≥ this | C: ≥1 user-dissatisfaction word OR ≥c2_distinct_keywords across the 4 keyword categories) for gene-evolve to invoke the CLI. message_length counts ALL messages in the slice — user, assistant, and tool_result wrappers — so one assistant turn with 3 tool calls contributes ~7. NOT the same as interaction-turn count."
   },
   "inject": {
     "max_genes": 8,

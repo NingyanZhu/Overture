@@ -35,7 +35,7 @@ const CONFIG = loadJsonRel('gene-categories.json', {});
 const KEYWORDS = loadJsonRel('keywords.json', {});
 const TRIGGER = CONFIG.trigger || {};
 const EVOLVE = CONFIG.evolve || {};
-const MIN_TURNS = TRIGGER.min_turns ?? 15;
+const MIN_MESSAGE_LENGTH = TRIGGER.message_length ?? 20;
 const MIN_DURATION_MS = TRIGGER.min_assistant_duration_ms ?? 180000;
 const C2_THRESHOLD = TRIGGER.c2_distinct_keywords ?? 3;
 const MAX_GENES_PER_CALL = EVOLVE.max_genes_per_call ?? 3;
@@ -61,10 +61,12 @@ function acquireLock() {
     return true;
   } catch (e) {
     if (e.code === 'EEXIST') {
-      // stale lock: > 1h old → take over
+      // stale lock: > 10min old → take over. A normal evolve run is bounded by
+      // cli_timeout_ms (3min) + spawnSync wrap (~3.5min total); 10min covers the
+      // worst case with headroom while still recovering quickly from a crashed run.
       try {
         const st = fs.statSync(LOCK_PATH);
-        if (Date.now() - st.mtimeMs > 60 * 60 * 1000) {
+        if (Date.now() - st.mtimeMs > 10 * 60 * 1000) {
           fs.unlinkSync(LOCK_PATH);
           return acquireLock();
         }
@@ -104,9 +106,11 @@ function extractSlice(history) {
 
 // ───────── trigger judgment ─────────
 
-function countTurns(slice) {
-  // Count by message boundary. user (real or tool_result wrapper) and assistant
-  // each count as one turn.
+function countMessages(slice) {
+  // Total message count in the slice (real-user / tool_result-wrapper / assistant
+  // all count). NOT the same as "interaction turns" — one assistant reply with
+  // 3 tool calls contributes ~7 messages. Named "message_length" in config to
+  // make this explicit.
   return slice.length;
 }
 
@@ -173,7 +177,7 @@ function matchCategory(text, vocab) {
 }
 
 function judgeTrigger(slice, turnDurationMs) {
-  const turns = countTurns(slice);
+  const messageLength = countMessages(slice);
   // 优先使用 sema-core 通过 StopHookInput.turn_duration_ms 注入的 wall-clock，
   // 它包含工具执行 + 等待时间，是"用户在这轮折腾了多久"的真实度量。
   // 老版本 sema-core 不带此字段时退回累加 message.durationMs（仅 API 时间和，会偏低）。
@@ -184,7 +188,7 @@ function judgeTrigger(slice, turnDurationMs) {
     ? 'turn_duration_ms'
     : 'sum_message_durationMs';
 
-  const aHit = turns >= MIN_TURNS;
+  const aHit = messageLength >= MIN_MESSAGE_LENGTH;
   const bHit = durationMs >= MIN_DURATION_MS;
 
   // C: keyword scan
@@ -212,7 +216,7 @@ function judgeTrigger(slice, turnDurationMs) {
   const score = (aHit ? 1 : 0) + (bHit ? 1 : 0) + (cHit ? 1 : 0);
   return {
     fire: score >= 2,
-    turns, durationMs, durationSource,
+    messageLength, durationMs, durationSource,
     aHit, bHit, cHit, c1, c2,
     keywordHits: Array.from(all),
     realUserText: realUserText.trim().slice(0, 500),
@@ -449,9 +453,13 @@ function buildTaskPrompt({ folded, domains, topGenes, triggerSummary }) {
     existing,
     '',
     'TRIGGER CONTEXT (why this conversation was selected):',
-    `- turns: ${triggerSummary.turns}, assistant duration: ${(triggerSummary.durationMs / 1000).toFixed(1)}s`,
+    `- messages: ${triggerSummary.messageLength}, assistant duration: ${(triggerSummary.durationMs / 1000).toFixed(1)}s`,
     `- C1 (user dissatisfaction): ${triggerSummary.c1}, C2 (≥${C2_THRESHOLD} distinct error/correction keywords): ${triggerSummary.c2}`,
     `- keyword hits: ${triggerSummary.keywordHits.slice(0, 12).join(', ') || '(none)'}`,
+    '',
+    'EVIDENCE SOURCE:',
+    '- The folded conversation timeline below is your PRIMARY (and usually sufficient) source — distil from it.',
+    '- Optional escalation: if you need to confirm a pattern is recurring vs. a one-off, past session snapshots may be available at `./hook-history/*.md` (or `**/hook-history/*.md` if cwd is elsewhere) saved by the notation plugin. Glob/Grep/Read them ONLY when the current slice cannot resolve "habit vs. one-off". Default behavior is to ignore them — every cross-session lookup costs latency and token budget.',
     '',
     'CONVERSATION TIMELINE (folded):',
     '```',
@@ -572,7 +580,7 @@ function main() {
     // judgeTrigger 内部会自动 fallback 到累加 message.durationMs。
     const trig = judgeTrigger(slice, payload.turn_duration_ms);
     record.trigger = {
-      fire: trig.fire, turns: trig.turns,
+      fire: trig.fire, messageLength: trig.messageLength,
       durationMs: trig.durationMs, durationSource: trig.durationSource,
       aHit: trig.aHit, bHit: trig.bHit, cHit: trig.cHit,
       keywordHits: trig.keywordHits,
@@ -745,7 +753,7 @@ if (require.main === module) {
 module.exports = {
   extractSlice,
   judgeTrigger,
-  countTurns,
+  countMessages,
   sumAssistantDurationMs,
   isRealUserMessage,
   flattenTextOfMessage,
