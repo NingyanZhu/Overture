@@ -52,23 +52,41 @@ function getWikiDir() {
 
 // ───────── lock ─────────
 
-function acquireLock() {
-  try { fs.mkdirSync(LOCK_DIR, { recursive: true }); } catch {}
+function acquireLock(lockPath = LOCK_PATH) {
+  try { fs.mkdirSync(path.dirname(lockPath), { recursive: true }); } catch {}
   try {
-    const fd = fs.openSync(LOCK_PATH, 'wx');
+    const fd = fs.openSync(lockPath, 'wx');
     fs.writeSync(fd, String(process.pid));
     fs.closeSync(fd);
     return true;
   } catch (e) {
     if (e.code === 'EEXIST') {
-      // stale lock: > 10min old → take over. A normal evolve run is bounded by
-      // cli_timeout_ms (3min) + spawnSync wrap (~3.5min total); 10min covers the
-      // worst case with headroom while still recovering quickly from a crashed run.
+      // Stale lock recovery, two paths:
+      //   1) PID liveness — if the recorded pid is gone, the previous run crashed
+      //      between acquire and release; reclaim immediately (no wait).
+      //   2) mtime fallback — > 10min old → take over. Bounds a normal run at
+      //      cli_timeout_ms (3min) + spawnSync wrap (~3.5min); 10min has headroom.
       try {
-        const st = fs.statSync(LOCK_PATH);
+        const raw = fs.readFileSync(lockPath, 'utf8').trim();
+        const heldPid = parseInt(raw, 10);
+        if (heldPid > 0 && heldPid !== process.pid) {
+          try {
+            process.kill(heldPid, 0); // signal 0 = liveness probe
+          } catch (probeErr) {
+            if (probeErr.code === 'ESRCH') {
+              fs.unlinkSync(lockPath);
+              return acquireLock(lockPath);
+            }
+            // EPERM means a process with that pid exists but we can't signal it;
+            // treat as alive and fall through to the mtime check.
+          }
+        }
+      } catch {}
+      try {
+        const st = fs.statSync(lockPath);
         if (Date.now() - st.mtimeMs > 10 * 60 * 1000) {
-          fs.unlinkSync(LOCK_PATH);
-          return acquireLock();
+          fs.unlinkSync(lockPath);
+          return acquireLock(lockPath);
         }
       } catch {}
     }
@@ -767,4 +785,5 @@ module.exports = {
   parseGenesFile,
   topRelevantGenes,
   buildTaskPrompt,
+  acquireLock,
 };
