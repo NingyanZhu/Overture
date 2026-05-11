@@ -450,8 +450,12 @@ function buildTaskPrompt({ folded, domains, topGenes, triggerSummary }) {
     '',
     'STRICT OUTPUT RULES:',
     '- Output a single JSON object, nothing else (no prose, no markdown fence required but allowed).',
-    '- Schema: { "genes": [ { "task_domain": "<Cat>/<Sub>", "is_new_domain": false, "keywords": ["...", ...], "gene_body": "AVOID: ..." | "DO: ...", "confidence": 0.0, "reasoning_brief": "<=50 words" } ] }',
+    '- Schema: { "genes": [ { "task_domain": "<Cat>/<Sub>", "is_new_domain": false, "slug": "<kebab-id>", "keywords": ["...", ...], "gene_body": "AVOID: ..." | "DO: ...", "confidence": 0.0, "reasoning_brief": "<=50 words" } ] }',
     '- "genes" array length MUST be ≤ ' + MAX_GENES_PER_CALL + '. Empty array allowed if nothing useful to extract.',
+    '- "slug" MUST be a short kebab-case identifier for THE CONSTRAINT (not just the topic). Becomes the markdown `##` heading.',
+    '  · Format: 2–4 dash-separated lowercase ASCII tokens, total ≤ 28 chars. English only.',
+    '  · GOOD: "search-tight-loop-retry", "rerank-latency-budget", "post-tool-verify", "task-clarify-before-plan", "search-rate-limit".',
+    '  · BAD: "research" (too vague — that\'s a topic, not a constraint), "search-stuff" (filler), "avoid-doing-bad-thing" (no specificity), "搜索-限流" (non-ASCII).',
     '- "gene_body" MUST be ONE LINE, ≤ 75 words, starting with "AVOID:" or "DO:". No examples, no story, no source. Pure constraint.',
     '- "keywords" MUST be lowercase short tokens capturing the *intent* of the gene (used for purely string-level retrieval at inject time — no embeddings, no translation).',
     '  · CRITICAL — TASK-DESCRIPTION VOCABULARY ONLY: keywords must be words a USER would actually TYPE when describing their problem or request ("怎么调试 auth 失败", "帮我调研一下…"). The retriever string-matches against raw user prompts, so architectural / design-pattern jargon that users don\'t naturally say will never fire and is wasted budget.',
@@ -570,6 +574,46 @@ function sanitizeBody(b) {
   return one;
 }
 
+// Slug is the markdown `## heading` for the gene — human-facing, never injected
+// into context (gene-inject only emits the body). Style matches hand-written
+// seeds: 2-4 dash-separated lowercase ASCII tokens describing the constraint.
+function sanitizeSlug(s) {
+  if (typeof s !== 'string') return null;
+  const cleaned = s.toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+  if (cleaned.length < 3 || cleaned.length > 28) return null;
+  const parts = cleaned.split('-').filter(Boolean);
+  if (parts.length < 2 || parts.length > 4) return null;
+  return parts.join('-');
+}
+
+// Pure: find a name that doesn't collide with existing `## name` headings in
+// `fileContent`. Returns baseName if free, else baseName-2 / baseName-3 / ...
+function nextAvailableName(fileContent, baseName) {
+  const existing = new Set();
+  const re = /^## (.+)$/gm;
+  let m;
+  while ((m = re.exec(fileContent || ''))) existing.add(m[1].trim());
+  if (!existing.has(baseName)) return baseName;
+  for (let i = 2; i < 100; i++) {
+    const cand = `${baseName}-${i}`;
+    if (!existing.has(cand)) return cand;
+  }
+  return `${baseName}-${Date.now()}`;
+}
+
+// Used when the LLM forgot/mangled `slug`. Matches the pre-2026-05 format
+// (`<kw0>-<YYYYMMDD>-<4-char-rand>`) so weight-sidecar keys remain valid for
+// any caller that still constructs names this way.
+function legacyFallbackName(gene) {
+  const slug = (gene.keywords && gene.keywords[0] || 'gene')
+    .toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 24);
+  const ts = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  return `${slug}-${ts}-${Math.random().toString(36).slice(2, 6)}`;
+}
+
 function ensureWikiDir(domain) {
   const target = path.join(getWikiDir(), 'Agent Genes', domain + '.md');
   fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -588,9 +632,10 @@ function ensureWikiDir(domain) {
 }
 
 function appendGene(filePath, gene) {
-  const slug = (gene.keywords[0] || 'gene').toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 24);
-  const ts = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  const name = `${slug}-${ts}-${Math.random().toString(36).slice(2, 6)}`;
+  let existing = '';
+  try { existing = fs.readFileSync(filePath, 'utf8'); } catch {}
+  const baseName = gene.slug || legacyFallbackName(gene);
+  const name = nextAvailableName(existing, baseName);
   const block = [
     '',
     `## ${name}`,
@@ -781,6 +826,10 @@ function main() {
       const kwArr = Array.isArray(raw.keywords) ? raw.keywords.map(k => String(k).toLowerCase()).filter(Boolean) : [];
       if (kwArr.length < 3 || kwArr.length > 12) { reason(`bad-keywords:${kwArr.length}`); continue; }
 
+      // Slug is the human-facing `## heading`; missing/invalid is non-fatal —
+      // appendGene falls back to the legacy `<kw0>-<date>-<rand>` format.
+      const slug = sanitizeSlug(raw.slug);
+
       const sameDomain = allExisting.filter(g => g.task_domain === domain);
       let dup = false;
       for (const e of sameDomain) {
@@ -789,7 +838,7 @@ function main() {
       if (dup) { reason('jaccard-dup'); continue; }
 
       const target = ensureWikiDir(domain);
-      const gene = { task_domain: domain, gene_body: body, keywords: kwArr, confidence: conf };
+      const gene = { task_domain: domain, gene_body: body, keywords: kwArr, slug, confidence: conf };
       const newName = appendGene(target, gene);
       // also push into in-memory existing list to dedup within the same batch
       allExisting.push({ task_domain: domain, intent: kwArr, name: '_pending', text: body });
@@ -844,6 +893,8 @@ module.exports = {
   jaccard,
   sanitizeDomain,
   sanitizeBody,
+  sanitizeSlug,
+  nextAvailableName,
   parseGenesFile,
   topRelevantGenes,
   buildTaskPrompt,
