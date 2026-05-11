@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 // Stop / PreCompact hook: persist conversation history to
-//   <cwd>/hook-history/<timestamp>-<agent_id>.md            (Stop)
-//   <cwd>/hook-history/Precompact-<timestamp>-<agent_id>.md (PreCompact)
+//   <cwd>/hook-history/<timestamp>-<persona>.md            (Stop)
+//   <cwd>/hook-history/Precompact-<timestamp>-<persona>.md (PreCompact)
+// where <persona> = basename(payload.cwd), i.e. the binding folder name
+// (~/semaclaw/agents/<folder>/). sema-core writes agent_id='main' regardless
+// of persona, so cwd's tail is the only reliable per-persona identifier.
 //
 // Additionally writes a sibling .json containing the latest *raw* LLM request
 // body (and the response that followed) for this session, sourced from
@@ -60,20 +63,26 @@ process.stdin.on('end', () => {
       process.exit(0);
     }
 
-    const safeAgent = String(agentId).replace(/[^A-Za-z0-9_.-]/g, '_');
+    // 文件名后缀用 cwd 末尾段（= 人设目录名，例如 ~/semaclaw/agents/{folder}/ 的 folder）。
+    // sema-core 写死 agent_id='main'，所有人设都会撞成 '-main.md'，没法区分；
+    // basename(cwd) 由 semaclaw 按 binding.folder 设置，多人设场景下天然唯一。
+    // 允许中文/日韩字符，仅替换文件系统非法字符；长度截断防极端命名。
+    const personaTag = String(path.basename(cwd || '') || agentId)
+      .replace(/[/\\:*?"<>|\x00-\x1f]/g, '_')
+      .slice(0, 80) || 'unknown';
     const dir = path.join(cwd, 'hook-history');
     fs.mkdirSync(dir, { recursive: true });
 
     let filePath;
     if (isPreCompact) {
-      filePath = path.join(dir, `Precompact-${makeStamp()}-${safeAgent}.md`);
+      filePath = path.join(dir, `Precompact-${makeStamp()}-${personaTag}.md`);
       const md = renderMarkdown({ agentId, sessionId, stopReason, eventName, payload, history });
       fs.writeFileSync(filePath, md, 'utf8');
       writeRawLLMSnapshot(filePath, sessionId);
       process.exit(0);
     }
 
-    const indexPath = path.join(dir, `.${safeAgent}.last.json`);
+    const indexPath = path.join(dir, `.${personaTag}.last.json`);
     const currentLastUuid = lastUuid(history);
     const prev = readIndex(indexPath);
 
@@ -89,7 +98,7 @@ process.stdin.on('end', () => {
     ) {
       filePath = prev.filePath;
     } else {
-      filePath = path.join(dir, `${makeStamp()}-${safeAgent}.md`);
+      filePath = path.join(dir, `${makeStamp()}-${personaTag}.md`);
     }
 
     const md = renderMarkdown({ agentId, sessionId, stopReason, eventName, payload, history });
