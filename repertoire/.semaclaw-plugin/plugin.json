@@ -1,0 +1,10 @@
+{
+  "name": "repertoire",
+  "description": "Skill accumulation layer — exposes the skill-reflector skill that distils a just-finished workflow into a SKILL.md, only on explicit user confirmation. The proactive nudge lives in the skill's description, not in a per-turn hook.",
+  "version": "0.2.0",
+  "author": {
+    "name": "NingyanZhu",
+    "email": "nzhu9313@gmail.com"
+  },
+  "keywords": ["skill", "self-evolve", "reflection", "user-controlled"]
+}
